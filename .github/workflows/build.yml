@@ -1,0 +1,26 @@
+name: Build Windows utilities
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+      - name: Publish collector
+        run: dotnet publish .\src\FseMultiMonitor.csproj -c Release -o .\artifacts\collector -p:SelfContained=false -p:PublishSingleFile=true
+      - name: Publish focus test window
+        run: dotnet publish .\testwindow\FseTestWindow.csproj -c Release -o .\artifacts\test-window -p:SelfContained=false -p:PublishSingleFile=true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fse-multimonitor-win-x64
+          path: .\artifacts\

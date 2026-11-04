@@ -1,0 +1,8 @@
+data/
+artifacts/
+publish/
+src/bin/
+src/obj/
+testwindow/bin/
+testwindow/obj/
+testwindow/publish/
