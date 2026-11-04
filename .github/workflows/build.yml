@@ -17,10 +17,22 @@ jobs:
         with:
           dotnet-version: 9.0.x
       - name: Publish collector
-        run: dotnet publish .\src\FseMultiMonitor.csproj -c Release -o .\artifacts\collector -p:SelfContained=false -p:PublishSingleFile=true
+        run: dotnet publish .\src\FseMultiMonitor.csproj -c Release -o .\artifacts\collector -p:SelfContained=false -p:PublishSingleFile=true -p:NuGetAudit=false
       - name: Publish focus test window
-        run: dotnet publish .\testwindow\FseTestWindow.csproj -c Release -o .\artifacts\test-window -p:SelfContained=false -p:PublishSingleFile=true
+        run: dotnet publish .\testwindow\FseTestWindow.csproj -c Release -o .\artifacts\test-window -p:SelfContained=false -p:PublishSingleFile=true -p:NuGetAudit=false
       - uses: actions/upload-artifact@v7
         with:
           name: fse-multimonitor-win-x64
-          path: .\artifacts\
+          path: |
+            .\artifacts\collector\
+            .\artifacts\test-window\
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+      - name: Publish self-contained app
+        run: dotnet publish .\src\FseMultiMonitor.csproj -c Release -r win-x64 -p:SelfContained=true -p:PublishSingleFile=true -p:NuGetAudit=false -o .\artifacts\app
+      - name: Build installer
+        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" .\installer\FseMultiMonitor.iss'
+      - uses: actions/upload-artifact@v7
+        with:
+          name: fse-multimonitor-setup
+          path: .\installer\Output\*.exe

@@ -2,9 +2,51 @@
 
 An x64 Windows 11 utility for viewing windows on a second display while Xbox Full Screen Experience (FSE) is active. It uses a borderless, no-activate overlay with DWM live thumbnails. It does not uncloak or move the original application window, and the mirror does not forward mouse or keyboard input.
 
+## Install
+
+### Installer (recommended)
+
+1. Download `FseMultiMonitor-Setup-<version>.exe` from [Releases](https://github.com/dizzi1222/fse-multimonitor/releases) or the latest CI artifact.
+2. Run the installer. It is per-user and does not require administrator rights.
+3. It installs to `%LOCALAPPDATA%\Programs\FseMultiMonitor`, adds a Start Menu shortcut, and optionally a desktop shortcut.
+4. Launch **FSE Multi-Monitor** from the Start Menu. The shortcut runs `FseMultiMonitor.exe select`.
+
+The installer bundles a self-contained build, so the .NET 9 Desktop Runtime is not required.
+
+> The installer is not code-signed. Windows SmartScreen may show a warning: choose **More info → Run anyway**.
+
+### Portable
+
+The `fse-multimonitor-win-x64` CI artifact is framework-dependent. It requires the [.NET 9 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/9.0) (x64) and must be run from a folder that also contains its dependencies:
+
+```powershell
+.\publish\FseMultiMonitor.exe select
+```
+
+### Shortcut
+
+`installer\Create-Shortcut.ps1` creates `FSE Multi-Monitor.lnk` in `publish\` and on the Desktop, pointing at `FseMultiMonitor.exe select`:
+
+```powershell
+.\installer\Create-Shortcut.ps1
+```
+
+A `.lnk` stores an absolute target path, so the repository ships the generator script as the portable option. The installer creates the real shortcut for the installed location. A machine-specific copy generated after installation is kept in [`shortcut/`](shortcut/README.md); it only works on the machine that produced it.
+
+### Build the installer
+
+Requires [Inno Setup 6](https://jrsoftware.org/isinfo.php):
+
+```powershell
+winget install JRSoftware.InnoSetup
+.\installer\build-installer.ps1 -Version 1.0.0
+```
+
+Output: `installer\Output\FseMultiMonitor-Setup-1.0.0.exe`. The script publishes a self-contained x64 build to `artifacts\app` first, then compiles the installer.
+
 ## Run
 
-The Windows x64 executable targets .NET 9 and requires the .NET 9 Windows Desktop Runtime.
+The portable Windows x64 executable targets .NET 9 and requires the .NET 9 Windows Desktop Runtime.
 
 ```powershell
 .\FseMultiMonitor.exe self-check
