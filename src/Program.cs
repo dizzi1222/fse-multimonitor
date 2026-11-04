@@ -33,6 +33,9 @@ internal static class Program
             {
                 "capture" => CaptureCommand(args[1..]),
                 "watch" => WatchCommand(args[1..]),
+                "windows" => WindowsCommand(args[1..]),
+                "preview" => PreviewCommand(args[1..]),
+                "select" => SelectCommand(),
                 "test-window" => TestWindowCommand(),
                 "probe" => ProbeCommand(args[1..]),
                 "probe-uncloak" => UncloakProbeCommand(args[1..]),
@@ -50,7 +53,7 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"{ex.GetType().Name}: {ex.Message}");
+            Console.Error.WriteLine(ex);
             return 1;
         }
     }
@@ -107,6 +110,102 @@ internal static class Program
             return 0;
         }
         finally { Console.CancelKeyPress -= cancel; Store.ResetCancel(); }
+    }
+
+    private static int WindowsCommand(string[] args)
+    {
+        bool includeTitles = args.Contains("--include-titles", StringComparer.OrdinalIgnoreCase);
+        var snapshot = Inspector.Capture(includeTitles, includeHashes: false);
+        Console.WriteLine($"FSE active={snapshot.Fse.Active}; active displays={snapshot.ActivePaths.Count(path => path.InUse && path.Available)}");
+        foreach (var window in snapshot.Windows.Where(window => window.Visible && !window.Iconic).OrderBy(window => window.ZOrder))
+        {
+            string title = includeTitles && !string.IsNullOrWhiteSpace(window.Title) ? $" title=\"{window.Title}\"" : string.Empty;
+            Console.WriteLine($"{window.Hwnd}  {window.ProcessName,-28} cloak={window.Cloaked} rect={window.Rect}{title}");
+        }
+        return 0;
+    }
+
+    private static int PreviewCommand(string[] args)
+    {
+        if (args.Length == 0 || IsHelp(args[0]))
+        {
+            Console.Error.WriteLine("Usage: FseMultiMonitor preview <HWND> [HWND ...] [--monitor 1-based-index]");
+            return 2;
+        }
+
+        int monitorNumber = 2;
+        var hwndArguments = new List<string>();
+        for (int i = 0; i < args.Length; i++)
+        {
+            if (StringComparer.OrdinalIgnoreCase.Equals(args[i], "--monitor"))
+            {
+                if (++i >= args.Length || !int.TryParse(args[i], out monitorNumber))
+                    throw new ArgumentException("--monitor requires a 1-based monitor number.");
+            }
+            else if (args[i].StartsWith("--", StringComparison.Ordinal))
+            {
+                throw new ArgumentException($"Unknown preview option: {args[i]}");
+            }
+            else hwndArguments.Add(args[i]);
+        }
+
+        if (hwndArguments.Count is < 1 or > 4)
+            throw new ArgumentException("Preview one to four window handles at a time.");
+        var requested = hwndArguments.Select(Inspector.ParseHwnd).Distinct().ToArray();
+        if (requested.Length != hwndArguments.Count)
+            throw new ArgumentException("Each source HWND must be unique.");
+
+        var snapshot = Inspector.Capture(includeHashes: false);
+        if (snapshot.Fse.Supported != true || snapshot.Fse.Active != true)
+            throw new InvalidOperationException("Preview requires Xbox Full Screen Experience to be confirmed active.");
+        if (snapshot.ActivePaths.Count(path => path.InUse && path.Available) < 2)
+            throw new InvalidOperationException("Preview requires at least two active display paths.");
+
+        var sources = new List<Inspector.WindowState>(requested.Length);
+        foreach (IntPtr hwnd in requested)
+        {
+            string canonicalHwnd = Inspector.Hwnd(hwnd);
+            var source = snapshot.Windows.SingleOrDefault(window => StringComparer.OrdinalIgnoreCase.Equals(window.Hwnd, canonicalHwnd))
+                ?? throw new ArgumentException($"HWND {canonicalHwnd} is not a current top-level desktop window.");
+            if (!source.Visible || source.Iconic)
+                throw new InvalidOperationException($"Source {canonicalHwnd} must be visible and unminimized; shell-cloaked sources are supported.");
+            sources.Add(source);
+        }
+
+        var activeMonitors = Screen.AllScreens;
+        if (monitorNumber < 1 || monitorNumber > activeMonitors.Length)
+            throw new ArgumentOutOfRangeException(nameof(monitorNumber), $"Monitor {monitorNumber} is not active; detected {activeMonitors.Length} monitor(s).");
+
+        Application.EnableVisualStyles();
+        Application.SetCompatibleTextRenderingDefault(false);
+        using var form = new WindowThumbnailPreview(sources, monitorNumber);
+        ConsoleCancelEventHandler cancel = (_, eventArgs) =>
+        {
+            eventArgs.Cancel = true;
+            if (form.IsHandleCreated && !form.IsDisposed)
+            {
+                try { form.BeginInvoke((Action)form.Close); }
+                catch (InvalidOperationException) { }
+            }
+        };
+        Console.CancelKeyPress += cancel;
+        try { Application.Run(form); }
+        finally { Console.CancelKeyPress -= cancel; }
+        return 0;
+    }
+
+    private static int SelectCommand()
+    {
+        var snapshot = Inspector.Capture(includeTitles: true, includeHashes: false);
+        if (snapshot.Fse.Supported != true || snapshot.Fse.Active != true)
+            throw new InvalidOperationException("Window selection requires Xbox Full Screen Experience to be confirmed active.");
+        if (snapshot.ActivePaths.Count(path => path.InUse && path.Available) < 2)
+            throw new InvalidOperationException("Window selection requires at least two active display paths.");
+
+        Application.EnableVisualStyles();
+        Application.SetCompatibleTextRenderingDefault(false);
+        Application.Run(new WindowPicker());
+        return 0;
     }
 
     private static int TestWindowCommand()
@@ -498,6 +597,10 @@ internal static class Program
 
               capture [--include-titles]       Save a point-in-time JSONL snapshot
               watch [seconds] [--include-titles] Observe state changes (default 600, maximum 1800 seconds)
+              windows [--include-titles]        List HWNDs for current top-level windows (console only)
+              select                          Open a visual window and monitor selector
+              preview <HWND> [HWND ...]         Mirror 1-4 windows as DWM thumbnails on display 2
+                [--monitor N]                  Select another 1-based display
               test-window                     Open a harmless focus and typing test window
               probe <HWND> [seconds]           Temporarily move one explicit window (maximum 30 seconds)
               probe-uncloak <HWND> [seconds]   Test uncloak on this build's owned FseTestWindow only

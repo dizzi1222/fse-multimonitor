@@ -1,8 +1,6 @@
 # FSE MultiMonitor
 
-An x64 Windows 11 diagnostic utility for observing Xbox Full Screen Experience (FSE), display topology, desktop windows, focus changes, and relevant shell binary versions and hashes.
-
-The utility reports; it does not currently contain a verified multi-monitor bypass. No target shell module or hook is selected. `apply` intentionally refuses to run unless a compatible experimental profile exists under the local profile directory.
+An x64 Windows 11 utility for viewing windows on a second display while Xbox Full Screen Experience (FSE) is active. It uses a borderless, no-activate overlay with DWM live thumbnails. It does not uncloak or move the original application window, and the mirror does not forward mouse or keyboard input.
 
 ## Run
 
@@ -13,6 +11,18 @@ The Windows x64 executable targets .NET 9 and requires the .NET 9 Windows Deskto
 .\FseMultiMonitor.exe capture
 .\FseMultiMonitor.exe watch 600
 .\FseMultiMonitor.exe test-window
+.\FseMultiMonitor.exe select
+```
+
+`select` opens a visible chooser while FSE is active and at least two displays are connected. Mark one to four windows, choose the destination monitor, then select **Mostrar**. Xbox Mode-cloaked windows can still appear in the chooser and be mirrored. The preview covers the selected monitor; **Pantalla completa** expands the thumbnails to fill the display, and **Vista ajustada** restores the fitted layout. Close the preview to return to the chooser. The selector and preview close when FSE ends.
+
+The preview is visual only. It does not make the original window interactive, and protected or secure surfaces may not be available as DWM thumbnails. Window titles are shown transiently in the chooser and are not written to preview logs.
+
+For scripts, list HWNDs and launch a preview directly:
+
+```powershell
+.\FseMultiMonitor.exe windows --include-titles
+.\FseMultiMonitor.exe preview 0x00000000001c0d1c --monitor 2
 ```
 
 The data directory defaults to `%LOCALAPPDATA%\FseMultiMonitor`. To save logs alongside this project:
@@ -61,10 +71,8 @@ dotnet publish .\src\FseMultiMonitor.csproj -c Release -o .\publish -p:SelfConta
 
 ## Current evidence
 
-An initial unprivileged capture reported `CanSet=false`; later elevated captures reported `CanSet=true`. Both reported FSE active. The Microsoft API setter changes the global gaming full-screen mode; it is not a per-monitor exemption. Windows reported two active 1920×1080 paths, with the secondary display at `(1920, 0)`.
+On the observed Windows 11 25H2 build 26200.9711, FSE remained active with two active 1920×1080 display paths. A normal test window reported `DWMWA_CLOAKED=2`, while the no-activate toolwindow overlay reported `0`. `DwmRegisterThumbnail` and `DwmUpdateThumbnailProperties` both succeeded, and the user confirmed the test form was visible inside the second-display panel. The production preview was then opened with the same result.
 
-On this PC, the test app's own DWM call succeeded while FSE stayed active, but the shell cloak returned in the same run: once after about 20 seconds and once within 260 ms of the form being shown. A third bounded run stayed cloaked after the one-shot attempt. CUA could read the window's accessibility tree during a brief interval, but could not obtain a usable screenshot/input surface after cloaking. No mouse click or typed-key acceptance has been verified, and no hook or shell patch has been built.
-
-The local test logs are under `data\owner-uncloak-*.jsonl`; the final point-in-time capture is under `data\sessions`. These machine-specific logs are excluded from Git. See `report.md` for sanitized measured outcomes and limits. `DWMWA_CLOAKED=2` means DWM reports that the shell cloaked the window ([Microsoft documentation](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/ne-dwmapi-dwmwindowattribute)). Before attempting in-process hooks, identify which component reapplies the cloak and gather traces that attribute the decision to a process/module.
+This verifies a live visual mirror on this machine and build. It does not prove that the original window has been uncloaked: the shell may continue to cloak it, and this app does not change that state. No input forwarding, anti-cheat compatibility, or protected-content capture has been verified. See `report.md` for details. Machine-specific JSONL logs are excluded from Git. `DWMWA_CLOAKED=2` means DWM reports that the shell cloaked the window ([Microsoft documentation](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/ne-dwmapi-dwmwindowattribute)).
 
 No license is included; code reuse rights remain unspecified.
