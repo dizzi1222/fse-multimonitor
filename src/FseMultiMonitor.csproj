@@ -1,8 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <OutputType>WinExe</OutputType>
     <TargetFramework>net9.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>false</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
@@ -13,5 +14,12 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <AssemblyName>FseMultiMonitor</AssemblyName>
     <RootNamespace>FseMultiMonitor</RootNamespace>
+    <ApplicationIcon>..\assets\icon.ico</ApplicationIcon>
+    <Version>1.1.0</Version>
+    <AssemblyVersion>1.1.0.0</AssemblyVersion>
+    <FileVersion>1.1.0.0</FileVersion>
+    <Product>FSE Multi-Monitor</Product>
+    <AssemblyTitle>FSE Multi-Monitor</AssemblyTitle>
+    <Description>View windows on a second display while Xbox Full Screen Experience is active.</Description>
   </PropertyGroup>
 </Project>

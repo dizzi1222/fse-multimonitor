@@ -21,11 +21,19 @@ internal sealed class WindowThumbnailPreview : Form
     private struct ThumbnailProperties
     {
         internal uint Flags;
-        internal Rectangle Destination;
-        internal Rectangle Source;
+        internal DwmRect Destination;
+        internal DwmRect Source;
         internal byte Opacity;
         [MarshalAs(UnmanagedType.Bool)] internal bool Visible;
         [MarshalAs(UnmanagedType.Bool)] internal bool SourceClientAreaOnly;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DwmRect
+    {
+        internal int Left, Top, Right, Bottom;
+        internal static DwmRect FromLtrb(int left, int top, int right, int bottom) =>
+            new() { Left = left, Top = top, Right = right, Bottom = bottom };
     }
 
     [DllImport("dwmapi.dll", PreserveSig = true)]
@@ -51,11 +59,18 @@ internal sealed class WindowThumbnailPreview : Form
     private readonly List<IntPtr> _thumbnails = [];
     private readonly List<Size> _sourceSizes = [];
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 1000 };
+    private readonly Label _heading;
     private readonly Label _status = new();
     private readonly Button _fullScreenButton;
+    private readonly Button _exitButton;
+    private readonly Button _closeButton;
+    private readonly Rectangle _monitorBounds;
     private readonly string _logPath;
     private string _lastSample = string.Empty;
+    private float _uiScale = 1f;
     private bool _fullScreen;
+
+    internal bool ExitRequested { get; private set; }
 
     internal WindowThumbnailPreview(IReadOnlyList<Inspector.WindowState> sources, int monitorNumber)
     {
@@ -64,7 +79,8 @@ internal sealed class WindowThumbnailPreview : Form
         if (monitorNumber < 1 || monitorNumber > screens.Length)
             throw new ArgumentOutOfRangeException(nameof(monitorNumber), $"Monitor {monitorNumber} is not active; detected {screens.Length} monitor(s).");
 
-        var bounds = screens[monitorNumber - 1].Bounds;
+        _monitorBounds = screens[monitorNumber - 1].Bounds;
+        var bounds = _monitorBounds;
         Text = "FSE MultiMonitor — Vista de ventanas";
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
@@ -74,8 +90,9 @@ internal sealed class WindowThumbnailPreview : Form
         ClientSize = bounds.Size;
         BackColor = Color.FromArgb(12, 18, 26);
         ForeColor = Color.White;
+        AutoScaleMode = AutoScaleMode.None;
 
-        var heading = new Label
+        _heading = new Label
         {
             Text = "VISTA DE VENTANAS · SOLO VISUAL",
             AutoSize = true,
@@ -103,7 +120,7 @@ internal sealed class WindowThumbnailPreview : Form
         _fullScreenButton.FlatAppearance.BorderSize = 0;
         _fullScreenButton.Click += (_, _) => ToggleFullScreen();
 
-        var close = new Button
+        _closeButton = new Button
         {
             Text = "×",
             AccessibleName = "Close visual mirror",
@@ -114,23 +131,55 @@ internal sealed class WindowThumbnailPreview : Form
             Location = new Point(bounds.Width - 56, 10),
             TabStop = false
         };
-        close.FlatAppearance.BorderSize = 0;
-        close.Click += (_, _) => Close();
-        Controls.AddRange([heading, _status, _fullScreenButton, close]);
+        _closeButton.FlatAppearance.BorderSize = 0;
+        _closeButton.Click += (_, _) => Close();
+
+        _exitButton = new Button
+        {
+            Text = "Salir",
+            AccessibleName = "Exit FSE Multi-Monitor",
+            FlatStyle = FlatStyle.Flat,
+            ForeColor = Color.White,
+            BackColor = Color.FromArgb(45, 58, 72),
+            Size = new Size(70, 34),
+            Location = new Point(bounds.Width - 306, 10),
+            TabStop = false
+        };
+        _exitButton.FlatAppearance.BorderSize = 0;
+        _exitButton.Click += (_, _) =>
+        {
+            ExitRequested = true;
+            Close();
+        };
+        Controls.AddRange([_heading, _status, _fullScreenButton, _exitButton, _closeButton]);
 
         _logPath = Store.NewSessionPath("preview");
-        Console.WriteLine($"Showing {sources.Count} DWM thumbnail(s) on display {monitorNumber}; visual only, no input forwarding.");
-        Console.WriteLine($"Close the overlay or exit FSE to stop it. JSONL log: {_logPath}");
+        AppendLog(new
+        {
+            timeUtc = DateTimeOffset.UtcNow,
+            @event = "preview-started",
+            sources = sources.Select(source => source.Hwnd).ToArray(),
+            monitorNumber,
+            visualOnly = true,
+            logPath = _logPath
+        });
 
         Shown += (_, _) =>
         {
+            _uiScale = Math.Max(1f, DeviceDpi / 96f);
+            LayoutChrome();
             try { RegisterThumbnails(monitorNumber); }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"Could not start the visual preview: {ex.Message}");
                 AppendLog(new { timeUtc = DateTimeOffset.UtcNow, @event = "preview-error", error = ex.Message });
                 Close();
             }
+        };
+        DpiChanged += (_, _) =>
+        {
+            _uiScale = Math.Max(1f, DeviceDpi / 96f);
+            LayoutChrome();
+            try { ApplyThumbnailLayout(); } catch (Exception ex) { AppendLog(new { timeUtc = DateTimeOffset.UtcNow, @event = "layout-error", error = ex.Message }); }
         };
         _timer.Tick += (_, _) => SampleState(monitorNumber);
         FormClosed += (_, _) => Cleanup();
@@ -148,6 +197,27 @@ internal sealed class WindowThumbnailPreview : Form
         }
     }
 
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        _uiScale = Math.Max(1f, DeviceDpi / 96f);
+        LayoutChrome();
+    }
+
+    private void LayoutChrome()
+    {
+        float scale = _uiScale <= 0 ? 1f : _uiScale;
+        int S(int value) => (int)Math.Round(value * scale);
+
+        _heading.Location = new Point(S(18), S(10));
+        _status.Location = new Point(S(20), _heading.Top + _heading.PreferredHeight + S(4));
+
+        int top = S(10);
+        _fullScreenButton.Bounds = new Rectangle(_monitorBounds.Width - S(226), top, S(160), S(34));
+        _exitButton.Bounds = new Rectangle(_monitorBounds.Width - S(306), top, S(70), S(34));
+        _closeButton.Bounds = new Rectangle(_monitorBounds.Width - S(56), top, S(42), S(34));
+    }
+
     private void RegisterThumbnails(int monitorNumber)
     {
         var cells = CreateCells(_sources.Count, ClientSize.Width, ClientSize.Height);
@@ -162,20 +232,26 @@ internal sealed class WindowThumbnailPreview : Form
             IntPtr hwnd = Inspector.ParseHwnd(source.Hwnd);
             int registerResult = DwmRegisterThumbnail(Handle, hwnd, out IntPtr thumbnail);
             if (registerResult < 0)
-                throw new InvalidOperationException($"DwmRegisterThumbnail failed for {source.Hwnd} (HRESULT 0x{registerResult:x8}).");
+            {
+                AppendLog(new { timeUtc = DateTimeOffset.UtcNow, @event = "thumbnail-skipped", source.Hwnd, registerResult });
+                continue;
+            }
 
             int sizeResult = DwmQueryThumbnailSourceSize(thumbnail, out Size sourceSize);
             if (sizeResult < 0 || sourceSize.Width <= 0 || sourceSize.Height <= 0)
             {
                 DwmUnregisterThumbnail(thumbnail);
-                throw new InvalidOperationException($"Could not query DWM thumbnail size for {source.Hwnd} (HRESULT 0x{sizeResult:x8}).");
+                AppendLog(new { timeUtc = DateTimeOffset.UtcNow, @event = "thumbnail-skipped", source.Hwnd, sizeResult });
+                continue;
             }
 
-            Rectangle destination = Fit(sourceSize, cells[i]);
+            int slot = _thumbnails.Count;
+            Rectangle destination = cells[Math.Min(slot, cells.Length - 1)];
+            DwmRect fitted = Fit(sourceSize, destination);
             var properties = new ThumbnailProperties
             {
                 Flags = DwmTnpRectDestination | DwmTnpOpacity | DwmTnpVisible | DwmTnpSourceClientAreaOnly,
-                Destination = destination,
+                Destination = fitted,
                 Opacity = 255,
                 Visible = true,
                 SourceClientAreaOnly = true
@@ -184,7 +260,8 @@ internal sealed class WindowThumbnailPreview : Form
             if (updateResult < 0)
             {
                 DwmUnregisterThumbnail(thumbnail);
-                throw new InvalidOperationException($"DwmUpdateThumbnailProperties failed for {source.Hwnd} (HRESULT 0x{updateResult:x8}).");
+                AppendLog(new { timeUtc = DateTimeOffset.UtcNow, @event = "thumbnail-skipped", source.Hwnd, updateResult });
+                continue;
             }
 
             _thumbnails.Add(thumbnail);
@@ -208,8 +285,11 @@ internal sealed class WindowThumbnailPreview : Form
             });
         }
 
+        if (_thumbnails.Count == 0)
+            throw new InvalidOperationException("None of the selected windows could be mirrored with a DWM thumbnail.");
+
         int overlayGet = DwmGetWindowAttribute(Handle, DwmwaCloaked, out int overlayCloak, sizeof(int));
-        _status.Text = $"Xbox Mode activo · {_sources.Count} ventana(s) en vista · panel cloak={(overlayGet == 0 ? overlayCloak : -1)} · sin entrada";
+        _status.Text = $"Xbox Mode activo · {_thumbnails.Count} ventana(s) en vista · panel cloak={(overlayGet == 0 ? overlayCloak : -1)} · sin entrada";
         _timer.Start();
         SampleState(monitorNumber);
     }
@@ -287,9 +367,9 @@ internal sealed class WindowThumbnailPreview : Form
 
     private Rectangle[] CreateCells(int count, int width, int height)
     {
-        int margin = _fullScreen ? 0 : 20;
-        int header = _fullScreen ? 0 : 72;
-        int gutter = _fullScreen ? 0 : 12;
+        int margin = _fullScreen ? 0 : (int)Math.Round(20 * _uiScale);
+        int header = _fullScreen ? 0 : Math.Max((int)Math.Round(72 * _uiScale), _status.Bottom + (int)Math.Round(8 * _uiScale));
+        int gutter = _fullScreen ? 0 : (int)Math.Round(12 * _uiScale);
         int columns = count == 1 ? 1 : 2;
         int rows = (count + columns - 1) / columns;
         int cellWidth = (width - 2 * margin - (columns - 1) * gutter) / columns;
@@ -312,20 +392,19 @@ internal sealed class WindowThumbnailPreview : Form
         try { ApplyThumbnailLayout(); }
         catch (Exception ex)
         {
-            _fullScreen = !_fullScreen;
-            _fullScreenButton.Text = _fullScreen ? "Vista ajustada" : "Pantalla completa";
-            _status.Text = $"No se pudo cambiar el tamaño de la vista: {ex.Message}";
-            return;
+            AppendLog(new { timeUtc = DateTimeOffset.UtcNow, @event = "layout-error", error = ex.Message });
         }
+        _heading.Visible = !_fullScreen;
+        _status.Visible = !_fullScreen;
         AppendLog(new { timeUtc = DateTimeOffset.UtcNow, @event = "layout", mode = _fullScreen ? "full-screen" : "fitted" });
     }
 
     private void ApplyThumbnailLayout()
     {
-        var cells = CreateCells(_sources.Count, ClientSize.Width, ClientSize.Height);
+        var cells = CreateCells(_thumbnails.Count, ClientSize.Width, ClientSize.Height);
         for (int i = 0; i < _thumbnails.Count; i++)
         {
-            Rectangle destination = Fit(_sourceSizes[i], cells[i]);
+            DwmRect destination = Fit(_sourceSizes[i], cells[i]);
             var properties = new ThumbnailProperties
             {
                 Flags = DwmTnpRectDestination | DwmTnpOpacity | DwmTnpVisible | DwmTnpSourceClientAreaOnly,
@@ -336,15 +415,17 @@ internal sealed class WindowThumbnailPreview : Form
             };
             int result = DwmUpdateThumbnailProperties(_thumbnails[i], ref properties);
             if (result < 0)
-                throw new InvalidOperationException($"Could not resize a DWM thumbnail (HRESULT 0x{result:x8}).");
+                AppendLog(new { timeUtc = DateTimeOffset.UtcNow, @event = "layout-thumbnail-skipped", index = i, result });
         }
     }
 
-    private static Rectangle Fit(Size source, Rectangle target)
+    private static DwmRect Fit(Size source, Rectangle target)
     {
         double scale = Math.Min((double)target.Width / source.Width, (double)target.Height / source.Height);
         int width = Math.Max(1, (int)Math.Round(source.Width * scale));
         int height = Math.Max(1, (int)Math.Round(source.Height * scale));
-        return new Rectangle(target.Left + (target.Width - width) / 2, target.Top + (target.Height - height) / 2, width, height);
+        int left = target.Left + (target.Width - width) / 2;
+        int top = target.Top + (target.Height - height) / 2;
+        return DwmRect.FromLtrb(left, top, left + width, top + height);
     }
 }

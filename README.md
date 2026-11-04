@@ -13,6 +13,10 @@ An x64 Windows 11 utility for viewing windows on a second display while Xbox Ful
 
 The installer bundles a self-contained build, so the .NET 9 Desktop Runtime is not required.
 
+Running a newer installer upgrades in place: it keeps the previous install folder, shortcuts, and desktop-icon choice. The app can also check for updates itself with **Buscar actualización** in the selector, or from a terminal with `FseMultiMonitor.exe check-update`.
+
+The user interface is currently in Spanish. An English translation is planned.
+
 > The installer is not code-signed. Windows SmartScreen may show a warning: choose **More info → Run anyway**.
 
 ### Portable
@@ -39,10 +43,10 @@ Requires [Inno Setup 6](https://jrsoftware.org/isinfo.php):
 
 ```powershell
 winget install JRSoftware.InnoSetup
-.\installer\build-installer.ps1 -Version 1.0.0
+.\installer\build-installer.ps1 -Version 1.1.0
 ```
 
-Output: `installer\Output\FseMultiMonitor-Setup-1.0.0.exe`. The script publishes a self-contained x64 build to `artifacts\app` first, then compiles the installer.
+Output: `installer\Output\FseMultiMonitor-Setup-1.1.0.exe`. The script publishes a self-contained x64 build to `artifacts\app` first, then compiles the installer.
 
 ## Run
 
@@ -56,7 +60,7 @@ The portable Windows x64 executable targets .NET 9 and requires the .NET 9 Windo
 .\FseMultiMonitor.exe select
 ```
 
-`select` opens a visible chooser while FSE is active and at least two displays are connected. Mark one to four windows, choose the destination monitor, then select **Mostrar**. Xbox Mode-cloaked windows can still appear in the chooser and be mirrored. The preview covers the selected monitor; **Pantalla completa** expands the thumbnails to fill the display, and **Vista ajustada** restores the fitted layout. Close the preview to return to the chooser. The selector and preview close when FSE ends.
+`select` opens a visible chooser while FSE is active and at least two displays are connected. The chooser lists the available windows and shows a live DWM thumbnail grid of six windows per page, with page controls next to **Vista previa**. Mark one to four windows, choose the destination monitor, then select **Mostrar**. Xbox Mode-cloaked windows can still appear in the chooser and be mirrored. The preview covers the selected monitor; **Pantalla completa** hides the title/status header and expands the thumbnails to fill the display, and **Vista ajustada** restores the fitted layout. **Salir** ends the app from inside the preview. Close the preview with **×** to return to the chooser. The selector and preview close when FSE ends.
 
 The preview is visual only. It does not make the original window interactive, and protected or secure surfaces may not be available as DWM thumbnails. Window titles are shown transiently in the chooser and are not written to preview logs.
 

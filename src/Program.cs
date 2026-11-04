@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -9,6 +10,16 @@ namespace FseMultiMonitor;
 
 internal static class Program
 {
+    private const uint AttachParentProcess = 0xFFFFFFFF;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool AttachConsole(uint dwProcessId);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool AllocConsole();
+
+    internal static bool ConsoleAttached { get; private set; }
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -19,13 +30,16 @@ internal static class Program
 
     private static int Main(string[] args)
     {
+        bool guiOnly = args.Length > 0 && args[0].Equals("select", StringComparison.OrdinalIgnoreCase);
+        if (!guiOnly) EnsureConsole();
+
         if (!OperatingSystem.IsWindows())
         {
             Console.Error.WriteLine("FseMultiMonitor runs on Windows 11.");
             return 2;
         }
 
-        Native.SetProcessDpiAwarenessContext(new IntPtr(-4));
+        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         try
         {
             if (args.Length == 0 || IsHelp(args[0])) { PrintUsage(); return 0; }
@@ -36,6 +50,7 @@ internal static class Program
                 "windows" => WindowsCommand(args[1..]),
                 "preview" => PreviewCommand(args[1..]),
                 "select" => SelectCommand(),
+                "check-update" => CheckUpdateCommand(),
                 "test-window" => TestWindowCommand(),
                 "probe" => ProbeCommand(args[1..]),
                 "probe-uncloak" => UncloakProbeCommand(args[1..]),
@@ -54,7 +69,37 @@ internal static class Program
         catch (Exception ex)
         {
             Console.Error.WriteLine(ex);
+            if (guiOnly) LogGuiError(ex);
             return 1;
+        }
+    }
+
+    private static void LogGuiError(Exception exception)
+    {
+        try
+        {
+            string path = Path.Combine(Path.GetTempPath(), "FseMultiMonitor-gui-error.log");
+            File.AppendAllText(path, $"{DateTimeOffset.Now:O} {exception}{Environment.NewLine}{Environment.NewLine}");
+        }
+        catch
+        {
+            // Diagnostics must never take the process down.
+        }
+    }
+
+    private static void EnsureConsole()
+    {
+        if (ConsoleAttached) return;
+        try
+        {
+            if (!AttachConsole(AttachParentProcess) && !AllocConsole()) return;
+            Console.SetOut(new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true });
+            Console.SetError(new StreamWriter(Console.OpenStandardError()) { AutoFlush = true });
+            ConsoleAttached = true;
+        }
+        catch
+        {
+            // No console is available; file logging still works.
         }
     }
 
@@ -204,7 +249,24 @@ internal static class Program
 
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
+        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+        Application.ThreadException += (_, e) => LogGuiError(e.Exception);
         Application.Run(new WindowPicker());
+        return 0;
+    }
+
+    private static int CheckUpdateCommand()
+    {
+        var update = UpdateChecker.CheckAsync().GetAwaiter().GetResult();
+        if (update is null)
+        {
+            Console.WriteLine($"Up to date: v{UpdateChecker.CurrentVersion}.");
+            return 0;
+        }
+
+        Console.WriteLine($"Update available: v{update.Version} (current v{UpdateChecker.CurrentVersion}).");
+        Console.WriteLine($"Installer: {update.SetupUrl}");
+        Console.WriteLine($"SHA256:    {update.ChecksumUrl}");
         return 0;
     }
 
@@ -601,6 +663,7 @@ internal static class Program
               select                          Open a visual window and monitor selector
               preview <HWND> [HWND ...]         Mirror 1-4 windows as DWM thumbnails on display 2
                 [--monitor N]                  Select another 1-based display
+              check-update                    Query GitHub Releases for a newer installer
               test-window                     Open a harmless focus and typing test window
               probe <HWND> [seconds]           Temporarily move one explicit window (maximum 30 seconds)
               probe-uncloak <HWND> [seconds]   Test uncloak on this build's owned FseTestWindow only
