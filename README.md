@@ -1,8 +1,12 @@
 # FSE MultiMonitor
 
+https://github.com/user-attachments/assets/f0a0fa82-0f03-4412-bef9-c757dcb08ebd
+
 An x64 Windows 11 utility for viewing windows on a second display while Xbox Full Screen Experience (FSE) is active. It uses a borderless, no-activate overlay with DWM live thumbnails. It does not uncloak or move the original application window, and the mirror does not forward mouse or keyboard input.
 
 ## Install
+
+https://github.com/user-attachments/assets/5e50e529-ca1b-49f9-bc6a-b2c66b191b7c
 
 ### Installer (recommended)
 
