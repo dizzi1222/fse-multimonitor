@@ -4,6 +4,8 @@ https://github.com/user-attachments/assets/f0a0fa82-0f03-4412-bef9-c757dcb08ebd
 
 An x64 Windows 11 utility for viewing windows on a second display while Xbox Full Screen Experience (FSE) is active. It uses a borderless, no-activate overlay with DWM live thumbnails. It does not uncloak or move the original application window, and the mirror does not forward mouse or keyboard input.
 
+![Window chooser with six live DWM thumbnails](assets/showcase.png)
+
 ## Install
 
 https://github.com/user-attachments/assets/5e50e529-ca1b-49f9-bc6a-b2c66b191b7c
@@ -67,6 +69,8 @@ The portable Windows x64 executable targets .NET 9 and requires the .NET 9 Windo
 `select` opens a visible chooser while FSE is active and at least two displays are connected. The chooser lists the available windows and shows a live DWM thumbnail grid of six windows per page, with page controls next to **Vista previa**. Mark one to four windows, choose the destination monitor, then select **Mostrar**. Xbox Mode-cloaked windows can still appear in the chooser and be mirrored. The preview covers the selected monitor; **Pantalla completa** hides the title/status header and expands the thumbnails to fill the display, and **Vista ajustada** restores the fitted layout. **Salir** ends the app from inside the preview. Close the preview with **×** to return to the chooser. The selector and preview close when FSE ends.
 
 The preview is visual only. It does not make the original window interactive, and protected or secure surfaces may not be available as DWM thumbnails. Window titles are shown transiently in the chooser and are not written to preview logs.
+
+![Visual-only full-screen view](assets/showcase-preview.png)
 
 For scripts, list HWNDs and launch a preview directly:
 
