@@ -15,9 +15,9 @@
     <AssemblyName>FseMultiMonitor</AssemblyName>
     <RootNamespace>FseMultiMonitor</RootNamespace>
     <ApplicationIcon>..\assets\icon.ico</ApplicationIcon>
-    <Version>1.1.0</Version>
-    <AssemblyVersion>1.1.0.0</AssemblyVersion>
-    <FileVersion>1.1.0.0</FileVersion>
+    <Version>1.1.2</Version>
+    <AssemblyVersion>1.1.2.0</AssemblyVersion>
+    <FileVersion>1.1.2.0</FileVersion>
     <Product>FSE Multi-Monitor</Product>
     <AssemblyTitle>FSE Multi-Monitor</AssemblyTitle>
     <Description>View windows on a second display while Xbox Full Screen Experience is active.</Description>

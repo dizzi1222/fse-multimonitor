@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FSE-LAB-S2</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #10161e; color: #fff; overflow: hidden; font-family: "Segoe UI", sans-serif; }
+  #bar { position: absolute; bottom: 90px; height: 90px; width: 12vw; background: #39d0ff; }
+  h1 { position: absolute; top: 24px; left: 28px; font-size: 42px; margin: 0; }
+  #counter { position: absolute; top: 90px; left: 28px; font: 34px Consolas, monospace; color: #ffd678; }
+  #seconds { position: absolute; top: 136px; left: 28px; font: 26px Consolas, monospace; color: #c9d4df; }
+  .swatches { position: absolute; bottom: 220px; left: 28px; right: 28px; height: 90px; display: flex; gap: 4px; }
+  .swatches div { flex: 1; }
+  #raf { position: absolute; right: 28px; top: 24px; font: 20px Consolas, monospace; color: #9fb3c6; }
+</style>
+</head>
+<body>
+<h1 id="title">FSE-LAB</h1>
+<div id="counter">frame 0</div>
+<div id="seconds">0.0 s</div>
+<div id="raf">requestAnimationFrame</div>
+<div id="bar"></div>
+<div class="swatches" id="swatches"></div>
+<script>
+  const params = new URLSearchParams(location.search);
+  const wanted = params.get("title");
+  if (wanted) document.title = wanted;
+  document.getElementById("title").textContent = document.title;
+  const swatches = document.getElementById("swatches");
+  for (let i = 0; i < 16; i++) swatches.appendChild(document.createElement("div"));
+  const bar = document.getElementById("bar");
+  const counter = document.getElementById("counter");
+  const seconds = document.getElementById("seconds");
+  let frame = 0;
+  const start = performance.now();
+  function hsv(h, s, v) {
+    h = ((h % 360) + 360) % 360;
+    const c = v * s, x = c * (1 - Math.abs((h / 60) % 2 - 1)), m = v - c;
+    let r = 0, g = 0, b = 0;
+    if (h < 60) [r, g, b] = [c, x, 0];
+    else if (h < 120) [r, g, b] = [x, c, 0];
+    else if (h < 180) [r, g, b] = [0, c, x];
+    else if (h < 240) [r, g, b] = [0, x, c];
+    else if (h < 300) [r, g, b] = [x, 0, c];
+    else [r, g, b] = [c, 0, x];
+    return `rgb(${((r + m) * 255) | 0},${((g + m) * 255) | 0},${((b + m) * 255) | 0})`;
+  }
+  const tiles = [...swatches.children];
+  function loop(now) {
+    frame++;
+    const width = window.innerWidth;
+    bar.style.left = ((frame * 4) % (width + 180)) - 180 + "px";
+    counter.textContent = "frame " + frame;
+    seconds.textContent = ((now - start) / 1000).toFixed(1) + " s";
+    tiles.forEach((tile, i) => tile.style.background = hsv(frame * 3 + i * 22, 0.85, 0.95));
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+</script>
+</body>
+</html>

@@ -11,10 +11,143 @@ internal static class Program
         Application.EnableVisualStyles();
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.SetCompatibleTextRenderingDefault(false);
-        bool tryOwnerUncloak = Environment.GetCommandLineArgs().Contains("--try-owner-uncloak", StringComparer.OrdinalIgnoreCase);
-        bool overlay = Environment.GetCommandLineArgs().Contains("--overlay", StringComparer.OrdinalIgnoreCase);
-        bool preview = Environment.GetCommandLineArgs().Contains("--preview", StringComparer.OrdinalIgnoreCase);
+        string[] args = Environment.GetCommandLineArgs();
+        bool Has(string value) => args.Contains(value, StringComparer.OrdinalIgnoreCase);
+        string? ValueOf(string name)
+        {
+            for (int i = 0; i < args.Length - 1; i++)
+                if (args[i].Equals(name, StringComparison.OrdinalIgnoreCase)) return args[i + 1];
+            return null;
+        }
+
+        bool tryOwnerUncloak = Has("--try-owner-uncloak");
+        bool overlay = Has("--overlay");
+        bool preview = Has("--preview");
+        bool animate = Has("--animate");
+        bool occluder = Has("--occluder");
+        bool toolWindow = Has("--toolwindow");
+        bool topmost = Has("--topmost");
+        string title = ValueOf("--title") ?? (animate ? "FSE-LAB-S1" : occluder ? "FSE-LAB-OCC" : "FseTestWindow");
+        int monitor = int.TryParse(ValueOf("--monitor"), out int parsed) ? parsed : 0;
+
+        if (occluder)
+        {
+            Application.Run(new OccluderForm(title, monitor, toolWindow, topmost));
+            return;
+        }
+        if (animate)
+        {
+            Application.Run(new AnimatedForm(title, monitor));
+            return;
+        }
+
         Application.Run(preview ? new ThumbnailPreviewForm() : new FocusTestForm(tryOwnerUncloak, overlay));
+    }
+
+    private sealed class AnimatedForm : Form
+    {
+        private readonly System.Windows.Forms.Timer _timer = new() { Interval = 33 };
+        private int _frame;
+
+        internal AnimatedForm(string title, int monitor)
+        {
+            Text = title;
+            StartPosition = FormStartPosition.Manual;
+            ClientSize = new Size(960, 640);
+            BackColor = Color.FromArgb(18, 22, 30);
+            ForeColor = Color.White;
+            var screens = Screen.AllScreens.OrderBy(screen => screen.Bounds.Left).ThenBy(screen => screen.Bounds.Top).ToArray();
+            var bounds = monitor >= 1 && monitor <= screens.Length ? screens[monitor - 1].Bounds : screens[0].WorkingArea;
+            Location = new Point(bounds.Left + 60, bounds.Top + 60);
+            DoubleBuffered = true;
+            _timer.Tick += (_, _) => { _frame++; Invalidate(); };
+            Shown += (_, _) => _timer.Start();
+            FormClosed += (_, _) => _timer.Dispose();
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            var graphics = e.Graphics;
+            int width = ClientSize.Width;
+            int height = ClientSize.Height;
+            int barWidth = Math.Max(40, width / 8);
+            int x = (_frame * 12) % Math.Max(1, width + barWidth) - barWidth;
+            using (var brush = new SolidBrush(Color.FromArgb(57, 208, 255)))
+                graphics.FillRectangle(brush, x, height - 90, barWidth, 90);
+            using var titleFont = new Font("Segoe UI", 28, FontStyle.Bold);
+            using var bodyFont = new Font("Consolas", 22, FontStyle.Regular);
+            TextRenderer.DrawText(graphics, "FSE-LAB · animación continua", titleFont,
+                new Rectangle(30, 30, width - 60, 50), Color.White);
+            TextRenderer.DrawText(graphics, $"frame {_frame}", bodyFont,
+                new Rectangle(30, 100, width - 60, 40), Color.FromArgb(255, 214, 120));
+            TextRenderer.DrawText(graphics, $"{(int)(_frame / 30.0)} s", bodyFont,
+                new Rectangle(30, 150, width - 60, 40), Color.Gainsboro);
+            for (int i = 0; i < 24; i++)
+            {
+                int hue = (_frame * 4 + i * 15) % 360;
+                using var brush = new SolidBrush(ColorFromHsv(hue, 0.85, 0.95));
+                graphics.FillRectangle(brush, 30 + i * ((width - 60) / 24), height - 210, (width - 60) / 24 - 4, 90);
+            }
+        }
+
+        private static Color ColorFromHsv(double hue, double saturation, double value)
+        {
+            int hi = (int)(hue / 60) % 6;
+            double f = hue / 60 - Math.Floor(hue / 60);
+            double p = value * (1 - saturation);
+            double q = value * (1 - f * saturation);
+            double t = value * (1 - (1 - f) * saturation);
+            (double r, double g, double b) = hi switch
+            {
+                0 => (value, t, p),
+                1 => (q, value, p),
+                2 => (p, value, t),
+                3 => (p, q, value),
+                4 => (t, p, value),
+                _ => (value, p, q)
+            };
+            return Color.FromArgb((int)(r * 255), (int)(g * 255), (int)(b * 255));
+        }
+    }
+
+    private sealed class OccluderForm : Form
+    {
+        private readonly bool _toolWindow;
+        private readonly bool _topMost;
+
+        internal OccluderForm(string title, int monitor, bool toolWindow, bool topMost)
+        {
+            Text = title;
+            FormBorderStyle = FormBorderStyle.None;
+            ShowInTaskbar = false;
+            StartPosition = FormStartPosition.Manual;
+            var screens = Screen.AllScreens.OrderBy(screen => screen.Bounds.Left).ThenBy(screen => screen.Bounds.Top).ToArray();
+            var bounds = monitor >= 1 && monitor <= screens.Length ? screens[monitor - 1].Bounds : screens[0].Bounds;
+            Bounds = bounds;
+            BackColor = Color.Black;
+            _toolWindow = toolWindow;
+            _topMost = topMost;
+            Shown += (_, _) =>
+            {
+                if (_topMost) TopMost = true;
+                Activate();
+                SetForegroundWindow(Handle);
+            };
+        }
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                var parameters = base.CreateParams;
+                if (_toolWindow) parameters.ExStyle |= 0x00000080; // WS_EX_TOOLWINDOW
+                return parameters;
+            }
+        }
+
+        [DllImport("user32.dll")]
+        private static extern bool SetForegroundWindow(IntPtr hwnd);
     }
 
     private sealed class FocusTestForm : Form

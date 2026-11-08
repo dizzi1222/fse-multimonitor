@@ -6,7 +6,7 @@ using System.Windows.Forms;
 
 namespace FseMultiMonitor;
 
-internal sealed class WindowThumbnailPreview : Form
+internal class WindowThumbnailPreview : Form
 {
     private const int WsExToolWindow = 0x00000080;
     private const int WsExTopmost = 0x00000008;
@@ -58,23 +58,33 @@ internal sealed class WindowThumbnailPreview : Form
     private readonly IReadOnlyList<Inspector.WindowState> _sources;
     private readonly List<IntPtr> _thumbnails = [];
     private readonly List<Size> _sourceSizes = [];
+    private readonly List<int> _thumbnailSourceIndex = [];
+    private readonly List<Rectangle> _destinations = [];
+    private readonly List<Label> _occlusionBadges = [];
+    private readonly bool _requireFse;
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 1000 };
     private readonly Label _heading;
     private readonly Label _status = new();
     private readonly Button _fullScreenButton;
+    private readonly Button _backButton;
     private readonly Button _exitButton;
     private readonly Button _closeButton;
     private readonly Rectangle _monitorBounds;
     private readonly string _logPath;
     private string _lastSample = string.Empty;
+    private string _lastOcclusion = string.Empty;
     private float _uiScale = 1f;
     private bool _fullScreen;
 
+    internal IReadOnlyList<Rectangle> ThumbnailDestinations => _destinations;
+    internal int RegisteredThumbnailCount => _thumbnails.Count;
+
     internal bool ExitRequested { get; private set; }
 
-    internal WindowThumbnailPreview(IReadOnlyList<Inspector.WindowState> sources, int monitorNumber)
+    internal WindowThumbnailPreview(IReadOnlyList<Inspector.WindowState> sources, int monitorNumber, bool requireFse = true)
     {
         _sources = sources;
+        _requireFse = requireFse;
         var screens = Screen.AllScreens.OrderBy(screen => screen.Bounds.Left).ThenBy(screen => screen.Bounds.Top).ToArray();
         if (monitorNumber < 1 || monitorNumber > screens.Length)
             throw new ArgumentOutOfRangeException(nameof(monitorNumber), $"Monitor {monitorNumber} is not active; detected {screens.Length} monitor(s).");
@@ -134,6 +144,24 @@ internal sealed class WindowThumbnailPreview : Form
         _closeButton.FlatAppearance.BorderSize = 0;
         _closeButton.Click += (_, _) => Close();
 
+        _backButton = new Button
+        {
+            Text = "Volver",
+            AccessibleName = "Return to window selector",
+            FlatStyle = FlatStyle.Flat,
+            ForeColor = Color.White,
+            BackColor = Color.FromArgb(45, 58, 72),
+            Size = new Size(70, 34),
+            Location = new Point(bounds.Width - 306, 10),
+            TabStop = false
+        };
+        _backButton.FlatAppearance.BorderSize = 0;
+        _backButton.Click += (_, _) =>
+        {
+            ExitRequested = false;
+            Close();
+        };
+
         _exitButton = new Button
         {
             Text = "Salir",
@@ -142,7 +170,7 @@ internal sealed class WindowThumbnailPreview : Form
             ForeColor = Color.White,
             BackColor = Color.FromArgb(45, 58, 72),
             Size = new Size(70, 34),
-            Location = new Point(bounds.Width - 306, 10),
+            Location = new Point(bounds.Width - 382, 10),
             TabStop = false
         };
         _exitButton.FlatAppearance.BorderSize = 0;
@@ -151,7 +179,7 @@ internal sealed class WindowThumbnailPreview : Form
             ExitRequested = true;
             Close();
         };
-        Controls.AddRange([_heading, _status, _fullScreenButton, _exitButton, _closeButton]);
+        Controls.AddRange([_heading, _status, _fullScreenButton, _backButton, _exitButton, _closeButton]);
 
         _logPath = Store.NewSessionPath("preview");
         AppendLog(new
@@ -204,6 +232,11 @@ internal sealed class WindowThumbnailPreview : Form
         LayoutChrome();
     }
 
+    protected virtual void OnPaint(PaintEventArgs e)
+    {
+        base.OnPaint(e);
+    }
+
     private void LayoutChrome()
     {
         float scale = _uiScale <= 0 ? 1f : _uiScale;
@@ -214,7 +247,8 @@ internal sealed class WindowThumbnailPreview : Form
 
         int top = S(10);
         _fullScreenButton.Bounds = new Rectangle(_monitorBounds.Width - S(226), top, S(160), S(34));
-        _exitButton.Bounds = new Rectangle(_monitorBounds.Width - S(306), top, S(70), S(34));
+        _backButton.Bounds = new Rectangle(_monitorBounds.Width - S(306), top, S(70), S(34));
+        _exitButton.Bounds = new Rectangle(_monitorBounds.Width - S(382), top, S(70), S(34));
         _closeButton.Bounds = new Rectangle(_monitorBounds.Width - S(56), top, S(42), S(34));
     }
 
@@ -224,7 +258,7 @@ internal sealed class WindowThumbnailPreview : Form
         bool fseActive;
         try { fseActive = IsGamingFullScreenExperienceActive(); }
         catch { fseActive = false; }
-        if (!fseActive) throw new InvalidOperationException("FSE became inactive before the preview overlay opened.");
+        if (_requireFse && !fseActive) throw new InvalidOperationException("FSE became inactive before the preview overlay opened.");
 
         for (int i = 0; i < _sources.Count; i++)
         {
@@ -266,6 +300,9 @@ internal sealed class WindowThumbnailPreview : Form
 
             _thumbnails.Add(thumbnail);
             _sourceSizes.Add(sourceSize);
+            _thumbnailSourceIndex.Add(i);
+            _destinations.Add(Rectangle.FromLTRB(fitted.Left, fitted.Top, fitted.Right, fitted.Bottom));
+            _occlusionBadges.Add(CreateOcclusionBadge(fitted));
             int sourceGet = DwmGetWindowAttribute(hwnd, DwmwaCloaked, out int sourceCloak, sizeof(int));
             AppendLog(new
             {
@@ -331,7 +368,9 @@ internal sealed class WindowThumbnailPreview : Form
                 : "Xbox Mode inactivo · cerrando vista";
         }
 
-        if (!fseActive || overlayValue != 0)
+        UpdateOcclusionBadges();
+
+        if ((_requireFse && !fseActive) || overlayValue != 0)
         {
             AppendLog(new { timeUtc = DateTimeOffset.UtcNow, @event = "preview-ended", reason = !fseActive ? "FSE inactive" : $"overlay cloak={overlayValue}" });
             Close();
@@ -341,6 +380,67 @@ internal sealed class WindowThumbnailPreview : Form
             AppendLog(new { timeUtc = DateTimeOffset.UtcNow, @event = "preview-ended", reason = "all source windows closed" });
             Close();
         }
+    }
+
+    private void UpdateOcclusionBadges()
+    {
+        if (_thumbnailSourceIndex.Count == 0 || _occlusionBadges.Count == 0) return;
+
+        var snapshot = Inspector.Capture(includeTitles: false, includeHashes: false);
+        var byHwnd = snapshot.Windows.ToDictionary(window => window.Hwnd, StringComparer.OrdinalIgnoreCase);
+        var parts = new List<object>(_thumbnailSourceIndex.Count);
+        int count = Math.Min(_thumbnailSourceIndex.Count, _occlusionBadges.Count);
+        for (int i = 0; i < count; i++)
+        {
+            var source = _sources[_thumbnailSourceIndex[i]];
+            var badge = _occlusionBadges[i];
+            if (!byHwnd.TryGetValue(source.Hwnd, out var current))
+            {
+                badge.Visible = false;
+                continue;
+            }
+
+            var result = OcclusionAdvisor.FindOccluder(snapshot.Windows, current, Environment.ProcessId);
+            bool browser = OcclusionAdvisor.IsBrowserLike(source.ProcessName);
+            bool risky = result.Occluded && browser;
+            badge.Text = risky ? $"⏸ Pausada por oclusión · {result.OccluderProcess}" : string.Empty;
+            badge.Visible = risky;
+
+            parts.Add(new
+            {
+                source.Hwnd,
+                source.ProcessName,
+                occluded = result.Occluded,
+                occluder = result.OccluderProcess,
+                browser
+            });
+        }
+
+        string signature = JsonSerializer.Serialize(parts);
+        if (!StringComparer.Ordinal.Equals(signature, _lastOcclusion))
+        {
+            AppendLog(new { timeUtc = DateTimeOffset.UtcNow, @event = "occlusion", sources = parts });
+            _lastOcclusion = signature;
+        }
+    }
+
+    private Label CreateOcclusionBadge(DwmRect fitted)
+    {
+        int S(int value) => (int)Math.Round(value * (_uiScale <= 0 ? 1f : _uiScale));
+        var badge = new Label
+        {
+            Text = string.Empty,
+            AutoSize = false,
+            Visible = false,
+            BackColor = Color.FromArgb(92, 58, 8),
+            ForeColor = Color.FromArgb(255, 214, 120),
+            Font = new Font("Segoe UI", 9, FontStyle.Bold),
+            TextAlign = ContentAlignment.MiddleCenter,
+            Bounds = new Rectangle(fitted.Left + S(8), fitted.Top + S(8), S(250), S(28))
+        };
+        Controls.Add(badge);
+        badge.BringToFront();
+        return badge;
     }
 
     private static bool ProcessStartMatches(Inspector.WindowState source)
@@ -367,6 +467,7 @@ internal sealed class WindowThumbnailPreview : Form
 
     private Rectangle[] CreateCells(int count, int width, int height)
     {
+        if (count <= 0) return Array.Empty<Rectangle>();
         int margin = _fullScreen ? 0 : (int)Math.Round(20 * _uiScale);
         int header = _fullScreen ? 0 : Math.Max((int)Math.Round(72 * _uiScale), _status.Bottom + (int)Math.Round(8 * _uiScale));
         int gutter = _fullScreen ? 0 : (int)Math.Round(12 * _uiScale);
@@ -401,6 +502,8 @@ internal sealed class WindowThumbnailPreview : Form
 
     private void ApplyThumbnailLayout()
     {
+        if (_thumbnails.Count == 0) return;
+        int S(int value) => (int)Math.Round(value * (_uiScale <= 0 ? 1f : _uiScale));
         var cells = CreateCells(_thumbnails.Count, ClientSize.Width, ClientSize.Height);
         for (int i = 0; i < _thumbnails.Count; i++)
         {
@@ -416,6 +519,12 @@ internal sealed class WindowThumbnailPreview : Form
             int result = DwmUpdateThumbnailProperties(_thumbnails[i], ref properties);
             if (result < 0)
                 AppendLog(new { timeUtc = DateTimeOffset.UtcNow, @event = "layout-thumbnail-skipped", index = i, result });
+
+            if (i < _destinations.Count)
+                _destinations[i] = Rectangle.FromLTRB(destination.Left, destination.Top, destination.Right, destination.Bottom);
+            if (i < _occlusionBadges.Count)
+                _occlusionBadges[i].Bounds = new Rectangle(
+                    destination.Left + S(8), destination.Top + S(8), S(250), S(28));
         }
     }
 

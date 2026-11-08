@@ -58,6 +58,7 @@ internal static class Program
                 "apply" => ApplyCommand(args[1..]),
                 "mode" => ModeCommand(args[1..]),
                 "self-check" => SelfCheckCommand(),
+                "freeze-lab" => FreezeLab.Run(args[1..]),
                 _ => UnknownCommand(args[0])
             };
         }
@@ -671,6 +672,9 @@ internal static class Program
               mode set on|off                 Request an explicit FSE mode transition through Microsoft's API
               apply <profile.json>            Apply a validated profile; refuses when none is installed
               self-check                      Check native ABI layouts and snapshot serialization
+              freeze-lab [--source S1,S2,S3] [--occluder F0..F4] [--seconds N] [--launch]
+                [--monitor N] [--title-prefix P] [--test-window PATH] [--anim PATH] [--self-test]
+                                             Measure thumbnail liveness under a full-screen occluder
 
             Window titles are excluded by default. Pass --include-titles only when their contents are safe
             to store in a local diagnostic log. Probes require confirmed active FSE and two active displays.

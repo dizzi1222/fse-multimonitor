@@ -1,6 +1,6 @@
 #define MyAppName "FSE Multi-Monitor"
 #ifndef MyAppVersion
-  #define MyAppVersion "1.1.0"
+  #define MyAppVersion "1.1.2"
 #endif
 #define MyAppPublisher "dizzi1222"
 #define MyAppURL "https://github.com/dizzi1222/fse-multimonitor"

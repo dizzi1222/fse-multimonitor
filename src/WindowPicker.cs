@@ -82,6 +82,8 @@ internal sealed class WindowPicker : Form
     private readonly System.Windows.Forms.Timer _centerTimer = new() { Interval = 400 };
     private readonly List<(IntPtr Thumbnail, string Hwnd)> _gridThumbnails = [];
     private Rectangle _previewBounds;
+    private float _layoutScale = 1f;
+    private (Control Control, Rectangle Bounds, bool PositionOnly)[] _baseLayout = [];
     private int _page;
     private int _pageCount = 1;
     private bool _previewOpen;
@@ -108,8 +110,7 @@ internal sealed class WindowPicker : Form
         ClientSize = new Size(1040, 600);
         BackColor = Color.FromArgb(16, 22, 30);
         ForeColor = Color.White;
-        AutoScaleMode = AutoScaleMode.Dpi;
-        AutoScaleDimensions = new SizeF(96F, 96F);
+        AutoScaleMode = AutoScaleMode.None;
         Font = new Font("Segoe UI", 10);
 
         var heading = new Label
@@ -174,20 +175,63 @@ internal sealed class WindowPicker : Form
         show.Click += (_, _) => ShowSelectedWindows();
         var close = MakeButton("Salir", 682, 544, 80);
         close.Click += (_, _) => Close();
-        _updateButton = MakeButton("Buscar actualización", 770, 544, 246);
+        _updateButton = MakeButton("Buscar actualización", 770, 544, 168);
         _updateButton.Click += async (_, _) => await HandleUpdateAsync();
+        var help = MakeButton("Ayuda", 946, 544, 70);
+        help.AccessibleName = "Ayuda sobre miniaturas congeladas";
+        help.Click += (_, _) => ShowFreezeHelp();
+
+        _baseLayout =
+        [
+            (heading, new Rectangle(24, 18, 0, 0), true),
+            (_status, new Rectangle(26, 58, 990, 24), false),
+            (_hint, new Rectangle(26, 84, 990, 40), false),
+            (_windows, new Rectangle(24, 128, 560, 392), false),
+            (previewLabel, new Rectangle(604, 100, 0, 0), true),
+            (previousPage, new Rectangle(872, 98, 32, 26), false),
+            (_pageLabel, new Rectangle(906, 102, 40, 20), false),
+            (nextPage, new Rectangle(948, 98, 32, 26), false),
+            (monitorLabel, new Rectangle(26, 550, 0, 0), true),
+            (_monitors, new Rectangle(120, 544, 340, 34), false),
+            (refresh, new Rectangle(470, 544, 96, 36), false),
+            (show, new Rectangle(574, 544, 100, 36), false),
+            (close, new Rectangle(682, 544, 80, 36), false),
+            (_updateButton, new Rectangle(770, 544, 168, 36), false),
+            (help, new Rectangle(946, 544, 70, 36), false)
+        ];
 
         Controls.AddRange([
             heading, _status, _hint, _windows, previewLabel, previousPage, _pageLabel, nextPage,
-            monitorLabel, _monitors, refresh, show, close, _updateButton
+            monitorLabel, _monitors, refresh, show, close, _updateButton, help
         ]);
         Paint += PaintPreviewPanel;
         MouseDown += (_, e) => SelectCardAt(e.Location);
+        MouseDoubleClick += (_, e) =>
+        {
+            if (_previewBounds.IsEmpty || !_previewBounds.Contains(e.Location) || _windows.Items.Count == 0) return;
+            float scale = _previewBounds.Width / 412f;
+            for (int slot = 0; slot < PreviewPageSize; slot++)
+            {
+                int index = _page * PreviewPageSize + slot;
+                if (index >= _windows.Items.Count) break;
+                if (CardRect(slot, scale).Contains(e.Location))
+                {
+                    _windows.SelectedIndex = index;
+                    _windows.SetItemChecked(index, true);
+                    ShowSelectedWindows();
+                    return;
+                }
+            }
+        };
 
         Shown += (_, _) =>
         {
+            _layoutScale = Math.Max(1f, DeviceDpi / 96f);
+            ClientSize = new Size(
+                (int)Math.Round(1040 * _layoutScale),
+                (int)Math.Round(600 * _layoutScale));
+            ApplyScaledLayout();
             CenterOnSelectedMonitor();
-            LayoutPreview();
             RefreshWindows();
             _fseTimer.Start();
             _centerTimer.Start();
@@ -201,9 +245,12 @@ internal sealed class WindowPicker : Form
         };
         DpiChanged += (_, _) => BeginInvoke((Action)(() =>
         {
+            _layoutScale = Math.Max(1f, DeviceDpi / 96f);
+            ClientSize = new Size(
+                (int)Math.Round(1040 * _layoutScale),
+                (int)Math.Round(600 * _layoutScale));
+            ApplyScaledLayout();
             CenterOnSelectedMonitor();
-            LayoutPreview();
-            UpdatePreviewGrid();
         }));
         _fseTimer.Tick += (_, _) =>
         {
@@ -415,18 +462,25 @@ internal sealed class WindowPicker : Form
         }
     }
 
+    private void ApplyScaledLayout()
+    {
+        int S(int value) => (int)Math.Round(value * _layoutScale);
+        foreach (var (control, bounds, positionOnly) in _baseLayout)
+        {
+            if (positionOnly)
+                control.Location = new Point(S(bounds.X), S(bounds.Y));
+            else
+                control.Bounds = new Rectangle(S(bounds.X), S(bounds.Y), S(bounds.Width), S(bounds.Height));
+        }
+        _previewBounds = Rectangle.Empty;
+        LayoutPreview();
+    }
+
     private void LayoutPreview()
     {
         if (!IsHandleCreated) return;
-        if (!GetClientRect(Handle, out Native.Rect client)) return;
-        int width = client.Right - client.Left;
-        if (width <= 0) return;
-        float scale = width / 1040f;
-        _previewBounds = Rectangle.FromLTRB(
-            (int)Math.Round(604 * scale),
-            (int)Math.Round(128 * scale),
-            (int)Math.Round((604 + 412) * scale),
-            (int)Math.Round((128 + 392) * scale));
+        int S(int value) => (int)Math.Round(value * _layoutScale);
+        _previewBounds = Rectangle.FromLTRB(S(604), S(128), S(604 + 412), S(128 + 392));
     }
 
     private Rectangle CardRect(int slot, float scale)
@@ -568,6 +622,19 @@ internal sealed class WindowPicker : Form
             _status.Text = $"La actualización falló: {ex.Message}";
             _updateButton.Enabled = true;
         }
+    }
+
+    private void ShowFreezeHelp()
+    {
+        string? process = null;
+        if (_windows.SelectedItem is WindowChoice choice) process = choice.State.ProcessName;
+        string advice = OcclusionAdvisor.AdviceFor(process);
+        MessageBox.Show(this,
+            "¿La miniatura se congela cuando Riot Client, Sekiro u otro juego tapa la ventana de origen?\n\n" +
+            advice,
+            "Miniaturas congeladas",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Information);
     }
 
     private void ShowSelectedWindows()
