@@ -386,6 +386,13 @@ internal class WindowThumbnailPreview : Form
     {
         if (_thumbnailSourceIndex.Count == 0 || _occlusionBadges.Count == 0) return;
 
+        if (_fullScreen)
+        {
+            foreach (var badge in _occlusionBadges)
+                badge.Visible = false;
+            return;
+        }
+
         var snapshot = Inspector.Capture(includeTitles: false, includeHashes: false);
         var byHwnd = snapshot.Windows.ToDictionary(window => window.Hwnd, StringComparer.OrdinalIgnoreCase);
         var parts = new List<object>(_thumbnailSourceIndex.Count);
@@ -497,6 +504,7 @@ internal class WindowThumbnailPreview : Form
         }
         _heading.Visible = !_fullScreen;
         _status.Visible = !_fullScreen;
+        try { UpdateOcclusionBadges(); } catch (Exception ex) { AppendLog(new { timeUtc = DateTimeOffset.UtcNow, @event = "occlusion-badge-error", error = ex.Message }); }
         AppendLog(new { timeUtc = DateTimeOffset.UtcNow, @event = "layout", mode = _fullScreen ? "full-screen" : "fitted" });
     }
 
