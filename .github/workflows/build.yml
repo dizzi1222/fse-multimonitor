@@ -18,6 +18,8 @@ jobs:
           dotnet-version: 9.0.x
       - name: Publish collector
         run: dotnet publish .\src\FseMultiMonitor.csproj -c Release -o .\artifacts\collector -p:SelfContained=false -p:PublishSingleFile=true -p:NuGetAudit=false
+      - name: Check fullscreen hover controls
+        run: dotnet run --project .\tests\HoverCheck\HoverCheck.csproj -c Release -p:NuGetAudit=false
       - name: Publish focus test window
         run: dotnet publish .\testwindow\FseTestWindow.csproj -c Release -o .\artifacts\test-window -p:SelfContained=false -p:PublishSingleFile=true -p:NuGetAudit=false
       - uses: actions/upload-artifact@v7

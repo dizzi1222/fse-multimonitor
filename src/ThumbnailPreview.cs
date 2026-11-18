@@ -58,9 +58,7 @@ internal class WindowThumbnailPreview : Form
     private readonly IReadOnlyList<Inspector.WindowState> _sources;
     private readonly List<IntPtr> _thumbnails = [];
     private readonly List<Size> _sourceSizes = [];
-    private readonly List<int> _thumbnailSourceIndex = [];
     private readonly List<Rectangle> _destinations = [];
-    private readonly List<Label> _occlusionBadges = [];
     private readonly bool _requireFse;
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 1000 };
     private readonly Label _heading;
@@ -72,9 +70,10 @@ internal class WindowThumbnailPreview : Form
     private readonly Rectangle _monitorBounds;
     private readonly string _logPath;
     private string _lastSample = string.Empty;
-    private string _lastOcclusion = string.Empty;
     private float _uiScale = 1f;
     private bool _fullScreen;
+    private readonly System.Windows.Forms.Timer _chromeTimer = new() { Interval = 100 };
+    private bool _waitForHoverExit;
 
     internal IReadOnlyList<Rectangle> ThumbnailDestinations => _destinations;
     internal int RegisteredThumbnailCount => _thumbnails.Count;
@@ -210,6 +209,8 @@ internal class WindowThumbnailPreview : Form
             try { ApplyThumbnailLayout(); } catch (Exception ex) { AppendLog(new { timeUtc = DateTimeOffset.UtcNow, @event = "layout-error", error = ex.Message }); }
         };
         _timer.Tick += (_, _) => SampleState(monitorNumber);
+        _chromeTimer.Tick += (_, _) => UpdateChromeHover(PointToClient(Cursor.Position));
+        Shown += (_, _) => _chromeTimer.Start();
         FormClosed += (_, _) => Cleanup();
     }
 
@@ -232,7 +233,7 @@ internal class WindowThumbnailPreview : Form
         LayoutChrome();
     }
 
-    protected virtual void OnPaint(PaintEventArgs e)
+    protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e);
     }
@@ -250,6 +251,25 @@ internal class WindowThumbnailPreview : Form
         _backButton.Bounds = new Rectangle(_monitorBounds.Width - S(306), top, S(70), S(34));
         _exitButton.Bounds = new Rectangle(_monitorBounds.Width - S(382), top, S(70), S(34));
         _closeButton.Bounds = new Rectangle(_monitorBounds.Width - S(56), top, S(42), S(34));
+    }
+
+    // Poll the screen cursor: hidden controls and DWM thumbnails do not reliably
+    // generate MouseEnter/MouseLeave, and this overlay must not take focus.
+    private void UpdateChromeHover(Point cursor)
+    {
+        var zone = Rectangle.Union(_exitButton.Bounds, _closeButton.Bounds);
+        int padding = (int)Math.Round(10 * _uiScale);
+        zone.Inflate(padding, padding);
+        zone.Y = 0;
+        bool hovered = ClientRectangle.Contains(cursor) && zone.Contains(cursor);
+        if (!hovered) _waitForHoverExit = false;
+        SetChromeButtonsVisible(!_fullScreen || (hovered && !_waitForHoverExit));
+    }
+
+    private void SetChromeButtonsVisible(bool visible)
+    {
+        foreach (var button in new[] { _fullScreenButton, _backButton, _exitButton, _closeButton })
+            button.Visible = visible;
     }
 
     private void RegisterThumbnails(int monitorNumber)
@@ -300,9 +320,7 @@ internal class WindowThumbnailPreview : Form
 
             _thumbnails.Add(thumbnail);
             _sourceSizes.Add(sourceSize);
-            _thumbnailSourceIndex.Add(i);
             _destinations.Add(Rectangle.FromLTRB(fitted.Left, fitted.Top, fitted.Right, fitted.Bottom));
-            _occlusionBadges.Add(CreateOcclusionBadge(fitted));
             int sourceGet = DwmGetWindowAttribute(hwnd, DwmwaCloaked, out int sourceCloak, sizeof(int));
             AppendLog(new
             {
@@ -368,7 +386,6 @@ internal class WindowThumbnailPreview : Form
                 : "Xbox Mode inactivo · cerrando vista";
         }
 
-        UpdateOcclusionBadges();
 
         if ((_requireFse && !fseActive) || overlayValue != 0)
         {
@@ -380,74 +397,6 @@ internal class WindowThumbnailPreview : Form
             AppendLog(new { timeUtc = DateTimeOffset.UtcNow, @event = "preview-ended", reason = "all source windows closed" });
             Close();
         }
-    }
-
-    private void UpdateOcclusionBadges()
-    {
-        if (_thumbnailSourceIndex.Count == 0 || _occlusionBadges.Count == 0) return;
-
-        if (_fullScreen)
-        {
-            foreach (var badge in _occlusionBadges)
-                badge.Visible = false;
-            return;
-        }
-
-        var snapshot = Inspector.Capture(includeTitles: false, includeHashes: false);
-        var byHwnd = snapshot.Windows.ToDictionary(window => window.Hwnd, StringComparer.OrdinalIgnoreCase);
-        var parts = new List<object>(_thumbnailSourceIndex.Count);
-        int count = Math.Min(_thumbnailSourceIndex.Count, _occlusionBadges.Count);
-        for (int i = 0; i < count; i++)
-        {
-            var source = _sources[_thumbnailSourceIndex[i]];
-            var badge = _occlusionBadges[i];
-            if (!byHwnd.TryGetValue(source.Hwnd, out var current))
-            {
-                badge.Visible = false;
-                continue;
-            }
-
-            var result = OcclusionAdvisor.FindOccluder(snapshot.Windows, current, Environment.ProcessId);
-            bool browser = OcclusionAdvisor.IsBrowserLike(source.ProcessName);
-            bool risky = result.Occluded && browser;
-            badge.Text = risky ? $"⏸ Pausada por oclusión · {result.OccluderProcess}" : string.Empty;
-            badge.Visible = risky;
-
-            parts.Add(new
-            {
-                source.Hwnd,
-                source.ProcessName,
-                occluded = result.Occluded,
-                occluder = result.OccluderProcess,
-                browser
-            });
-        }
-
-        string signature = JsonSerializer.Serialize(parts);
-        if (!StringComparer.Ordinal.Equals(signature, _lastOcclusion))
-        {
-            AppendLog(new { timeUtc = DateTimeOffset.UtcNow, @event = "occlusion", sources = parts });
-            _lastOcclusion = signature;
-        }
-    }
-
-    private Label CreateOcclusionBadge(DwmRect fitted)
-    {
-        int S(int value) => (int)Math.Round(value * (_uiScale <= 0 ? 1f : _uiScale));
-        var badge = new Label
-        {
-            Text = string.Empty,
-            AutoSize = false,
-            Visible = false,
-            BackColor = Color.FromArgb(92, 58, 8),
-            ForeColor = Color.FromArgb(255, 214, 120),
-            Font = new Font("Segoe UI", 9, FontStyle.Bold),
-            TextAlign = ContentAlignment.MiddleCenter,
-            Bounds = new Rectangle(fitted.Left + S(8), fitted.Top + S(8), S(250), S(28))
-        };
-        Controls.Add(badge);
-        badge.BringToFront();
-        return badge;
     }
 
     private static bool ProcessStartMatches(Inspector.WindowState source)
@@ -465,6 +414,8 @@ internal class WindowThumbnailPreview : Form
     {
         _timer.Stop();
         _timer.Dispose();
+        _chromeTimer.Stop();
+        _chromeTimer.Dispose();
         foreach (IntPtr thumbnail in _thumbnails) DwmUnregisterThumbnail(thumbnail);
         _thumbnails.Clear();
     }
@@ -495,6 +446,10 @@ internal class WindowThumbnailPreview : Form
     private void ToggleFullScreen()
     {
         _fullScreen = !_fullScreen;
+        // The click which enters full screen is already over a button. Require
+        // leaving the toolbar once before another hover can reveal it.
+        _waitForHoverExit = _fullScreen;
+        SetChromeButtonsVisible(!_fullScreen);
         _fullScreenButton.Text = _fullScreen ? "Vista ajustada" : "Pantalla completa";
         _fullScreenButton.AccessibleName = _fullScreen ? "Return to fitted preview" : "Toggle full screen preview";
         try { ApplyThumbnailLayout(); }
@@ -504,14 +459,12 @@ internal class WindowThumbnailPreview : Form
         }
         _heading.Visible = !_fullScreen;
         _status.Visible = !_fullScreen;
-        try { UpdateOcclusionBadges(); } catch (Exception ex) { AppendLog(new { timeUtc = DateTimeOffset.UtcNow, @event = "occlusion-badge-error", error = ex.Message }); }
         AppendLog(new { timeUtc = DateTimeOffset.UtcNow, @event = "layout", mode = _fullScreen ? "full-screen" : "fitted" });
     }
 
     private void ApplyThumbnailLayout()
     {
         if (_thumbnails.Count == 0) return;
-        int S(int value) => (int)Math.Round(value * (_uiScale <= 0 ? 1f : _uiScale));
         var cells = CreateCells(_thumbnails.Count, ClientSize.Width, ClientSize.Height);
         for (int i = 0; i < _thumbnails.Count; i++)
         {
@@ -530,9 +483,7 @@ internal class WindowThumbnailPreview : Form
 
             if (i < _destinations.Count)
                 _destinations[i] = Rectangle.FromLTRB(destination.Left, destination.Top, destination.Right, destination.Bottom);
-            if (i < _occlusionBadges.Count)
-                _occlusionBadges[i].Bounds = new Rectangle(
-                    destination.Left + S(8), destination.Top + S(8), S(250), S(28));
+
         }
     }
 

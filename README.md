@@ -128,3 +128,9 @@ On the observed Windows 11 25H2 build 26200.9711, FSE remained active with two a
 This verifies a live visual mirror on this machine and build. It does not prove that the original window has been uncloaked: the shell may continue to cloak it, and this app does not change that state. No input forwarding, anti-cheat compatibility, or protected-content capture has been verified. See `report.md` for details. Machine-specific JSONL logs are excluded from Git. `DWMWA_CLOAKED=2` means DWM reports that the shell cloaked the window ([Microsoft documentation](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/ne-dwmapi-dwmwindowattribute)).
 
 No license is included; code reuse rights remain unspecified.
+
+### v1.1.4
+
+In full screen, the preview buttons (Salir, Volver, Vista ajustada and Close) hide automatically. Move the pointer to the upper-right control area to reveal them; move it away to hide them again. Fitted view keeps its controls visible.
+
+The on-preview occlusion badge has been removed in v1.1.4.

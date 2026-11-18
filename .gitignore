@@ -7,3 +7,6 @@ testwindow/bin/
 testwindow/obj/
 testwindow/publish/
 installer/Output/
+
+tests/**/bin/
+tests/**/obj/
